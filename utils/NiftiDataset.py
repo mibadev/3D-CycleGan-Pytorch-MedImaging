@@ -120,30 +120,21 @@ def resample_sitk_image(sitk_image, spacing=None, interpolator=None, fill_value=
         'lanczos_windowed_sinc': sitk.sitkLanczosWindowedSinc
     }
 
-    """Resamples an ITK image to a new grid. If no spacing is given,
+    """
+    Resamples an ITK image to a new grid. If no spacing is given,
     the resampling is done isotropically to the smallest value in the current
     spacing. This is usually the in-plane resolution. If not given, the
     interpolation is derived from the input data type. Binary input
     (e.g., masks) are resampled with nearest neighbors, otherwise linear
     interpolation is chosen.
-    Parameters
-    ----------
-    sitk_image : SimpleITK image or str
-      Either a SimpleITK image or a path to a SimpleITK readable file.
-    spacing : tuple
-      Tuple of integers
-    interpolator : str
-      Either `nearest`, `linear` or None.
-    fill_value : int
-    Returns
-    -------
-    SimpleITK image.
     """
 
+    # If a path was passed, read the image from file
     if isinstance(sitk_image, str):
         sitk_image = sitk.ReadImage(sitk_image)
     num_dim = sitk_image.GetDimension()
 
+    # Infer default interpolator
     if not interpolator:
         interpolator = 'linear'
         pixelid = sitk_image.GetPixelIDValue()
@@ -159,34 +150,39 @@ def resample_sitk_image(sitk_image, spacing=None, interpolator=None, fill_value=
     orig_origin = sitk_image.GetOrigin()
     orig_direction = sitk_image.GetDirection()
     orig_spacing = np.array(sitk_image.GetSpacing())
-    orig_size = np.array(sitk_image.GetSize(), dtype=np.int)
+    orig_size = np.array(sitk_image.GetSize(), dtype=np.int64)
 
+    # If no spacing is given, use isotropic spacing at the minimum of the original
     if not spacing:
         min_spacing = orig_spacing.min()
         new_spacing = [min_spacing] * num_dim
     else:
         new_spacing = [float(s) for s in spacing]
 
+    # Ensure valid interpolator
     assert interpolator in _SITK_INTERPOLATOR_DICT.keys(), \
         '`interpolator` should be one of {}'.format(_SITK_INTERPOLATOR_DICT.keys())
-
     sitk_interpolator = _SITK_INTERPOLATOR_DICT[interpolator]
 
+    # Calculate new size
     new_size = orig_size * (orig_spacing / new_spacing)
-    new_size = np.ceil(new_size).astype(np.int)  # Image dimensions are in integers
-    new_size = [int(s) for s in new_size]  # SimpleITK expects lists, not ndarrays
+    new_size = np.ceil(new_size).astype(int)  # Use int to avoid np.int deprecation
+    new_size = [int(s) for s in new_size]     # SimpleITK wants a list
 
-    resample_filter = sitk.ResampleImageFilter()
-
-    resampled_sitk_image = resample_filter.Execute(sitk_image,
-                                                   new_size,
-                                                   sitk.Transform(),
-                                                   sitk_interpolator,
-                                                   orig_origin,
-                                                   new_spacing,
-                                                   orig_direction,
-                                                   fill_value,
-                                                   orig_pixelid)
+    # ------------------------------------------------
+    # Use the SimpleITK.Resample(...) convenience function instead of filter.Execute(...)
+    # ------------------------------------------------
+    resampled_sitk_image = sitk.Resample(
+        sitk_image,
+        new_size,
+        sitk.Transform(),       # Identity transform
+        sitk_interpolator,
+        orig_origin,
+        new_spacing,
+        orig_direction,
+        fill_value,
+        orig_pixelid
+    )
 
     return resampled_sitk_image
 
